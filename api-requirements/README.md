@@ -15,20 +15,45 @@ consolidated API Requirements Document can be generated.
   requirement and assign stakeholders per section, the per-stakeholder fill
   form (accessed via a private link), and the compiled document view.
 
+## Admin access
+
+Creating requirements, assigning stakeholders, and viewing/managing them
+(dashboard, requirement detail, document) require an admin login - a single
+shared password, not per-user accounts. The per-stakeholder `/fill/:token`
+links are intentionally unauthenticated: they're the thing you hand out.
+
+Configure it via environment variables before running the server:
+
+- `ADMIN_PASSWORD` — the shared admin password. Defaults to `admin` outside
+  of production (with a startup warning); **required** when
+  `NODE_ENV=production`.
+- `SESSION_SECRET` — signs the session cookie. If unset, a random one is
+  generated at boot (sessions won't survive a server restart).
+
+Login attempts are rate-limited (5 bad attempts locks an IP out for a
+minute) and the password is compared with a constant-time hash comparison.
+
 ## Running locally
 
 ```bash
 cd api-requirements
-npm install                # installs both workspaces
-npm run dev:server         # http://localhost:4000
-npm run dev:client         # http://localhost:5173 (proxies /api to :4000)
+ADMIN_PASSWORD=your-password npm run dev:server   # http://localhost:4000
+npm run dev:client                                # http://localhost:5173 (proxies /api to :4000)
 ```
 
-Open http://localhost:5173, create a new requirement, assign a stakeholder
-to each section you want filled, then open the generated `/fill/:token`
-links (one per stakeholder) to fill and submit each section independently.
-Once every assigned section is marked complete, the "View Document" link on
-the requirement page becomes available.
+(`npm install` first, if you haven't - installs both workspaces.)
+
+Open http://localhost:5173, log in with the admin password, create a new
+requirement, and assign a stakeholder to each section you want filled. Send
+each stakeholder their generated `/fill/:token` link (no login needed on
+their end) so they can fill and submit their section independently. Once
+every assigned section is marked complete, the "View Document" link on the
+requirement page becomes available.
+
+From the requirement's detail page you can also, as admin: edit a
+stakeholder's name/email in place, regenerate a section's link (revokes the
+old one and resets that section's progress - useful if a link leaked or
+needs resending), or delete the whole requirement.
 
 ## Adding a new section
 

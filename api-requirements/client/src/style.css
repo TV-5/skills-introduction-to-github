@@ -22,6 +22,22 @@ body {
   padding: 2rem 1.5rem 4rem;
 }
 
+.admin-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1.5rem;
+  border-bottom: 1px solid var(--border);
+  max-width: 780px;
+  margin: 0 auto;
+}
+
+.admin-bar a {
+  font-weight: 700;
+  color: inherit;
+  text-decoration: none;
+}
+
 .page-header {
   display: flex;
   align-items: center;
@@ -57,6 +73,22 @@ h1 {
   border-color: #aaa;
   color: #eee;
   cursor: not-allowed;
+}
+
+.button.danger {
+  background: transparent;
+  color: #c0392b;
+  border: 1px solid #c0392b;
+}
+
+.link-button {
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  padding: 0;
+  font-size: inherit;
+  text-decoration: underline;
 }
 
 .requirement-list {
@@ -194,10 +226,29 @@ h1 {
   color: #1e7e34;
 }
 
+.section-card-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0.5rem 0;
+  padding: 0.75rem;
+  background: rgba(127, 127, 127, 0.06);
+  border-radius: 6px;
+}
+
+.section-card-edit label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
 .section-card-link {
   display: flex;
   gap: 0.5rem;
   margin-top: 0.5rem;
+  flex-wrap: wrap;
 }
 
 .section-card-link input {

@@ -2,8 +2,14 @@ import { Router } from "express";
 import { nanoid } from "nanoid";
 import { db } from "../db.js";
 import { generateDocument } from "../documentGenerator.js";
+import { requireAdmin } from "../adminAuth.js";
 
 export const requirementsRouter = Router();
+// Every route here manages requirement/stakeholder data (names, emails, links) - admin only.
+// requireAdmin is applied per-route (not via router.use) because this router is mounted at the
+// same "/api" prefix as the public, token-gated assignments router - a router-wide `.use()` would
+// run for every "/api/*" request Express forwards into this router, including ones meant for
+// the other router, and block them before they ever get there.
 
 function getSectionRows() {
   return db.prepare("SELECT * FROM sections ORDER BY sort_order").all();
@@ -24,6 +30,7 @@ function assignmentsForRequirement(requirementId) {
 
 function serializeRequirement(requirement, assignments) {
   const sections = assignments.map((row) => ({
+    assignmentId: row.id,
     sectionId: row.section_id,
     key: row.section_key,
     label: row.section_label,
@@ -49,7 +56,7 @@ function serializeRequirement(requirement, assignments) {
 }
 
 // GET /api/sections - available section definitions, for building the assignment form
-requirementsRouter.get("/sections", (req, res) => {
+requirementsRouter.get("/sections", requireAdmin, (req, res) => {
   const sections = getSectionRows().map((s) => ({
     id: s.id,
     key: s.key,
@@ -61,14 +68,14 @@ requirementsRouter.get("/sections", (req, res) => {
 });
 
 // GET /api/requirements - list with progress summary
-requirementsRouter.get("/requirements", (req, res) => {
+requirementsRouter.get("/requirements", requireAdmin, (req, res) => {
   const requirements = db.prepare("SELECT * FROM api_requirements ORDER BY created_at DESC").all();
   const result = requirements.map((r) => serializeRequirement(r, assignmentsForRequirement(r.id)));
   res.json(result);
 });
 
 // POST /api/requirements - create a requirement with per-section stakeholder assignments
-requirementsRouter.post("/requirements", (req, res) => {
+requirementsRouter.post("/requirements", requireAdmin, (req, res) => {
   const { name, description, assignments } = req.body ?? {};
 
   if (!name || typeof name !== "string" || !name.trim()) {
@@ -112,14 +119,14 @@ requirementsRouter.post("/requirements", (req, res) => {
 });
 
 // GET /api/requirements/:id - single requirement with section statuses
-requirementsRouter.get("/requirements/:id", (req, res) => {
+requirementsRouter.get("/requirements/:id", requireAdmin, (req, res) => {
   const requirement = db.prepare("SELECT * FROM api_requirements WHERE id = ?").get(req.params.id);
   if (!requirement) return res.status(404).json({ error: "not found" });
   res.json(serializeRequirement(requirement, assignmentsForRequirement(requirement.id)));
 });
 
 // GET /api/requirements/:id/document - compiled document, only once every section is completed
-requirementsRouter.get("/requirements/:id/document", (req, res) => {
+requirementsRouter.get("/requirements/:id/document", requireAdmin, (req, res) => {
   const requirement = db.prepare("SELECT * FROM api_requirements WHERE id = ?").get(req.params.id);
   if (!requirement) return res.status(404).json({ error: "not found" });
 
@@ -144,4 +151,52 @@ requirementsRouter.get("/requirements/:id/document", (req, res) => {
 
   const markdown = generateDocument(requirement, sectionsWithAssignments);
   res.json({ markdown });
+});
+
+function getAssignment(requirementId, assignmentId) {
+  return db
+    .prepare("SELECT * FROM section_assignments WHERE id = ? AND api_requirement_id = ?")
+    .get(assignmentId, requirementId);
+}
+
+// PATCH /api/requirements/:id/assignments/:assignmentId - fix a stakeholder's name/email
+// without touching their progress or link.
+requirementsRouter.patch("/requirements/:id/assignments/:assignmentId", requireAdmin, (req, res) => {
+  const assignment = getAssignment(req.params.id, req.params.assignmentId);
+  if (!assignment) return res.status(404).json({ error: "not found" });
+
+  const { stakeholderName, stakeholderEmail } = req.body ?? {};
+  if (!stakeholderName?.trim() || !stakeholderEmail?.trim()) {
+    return res.status(400).json({ error: "stakeholderName and stakeholderEmail are required" });
+  }
+
+  db.prepare("UPDATE section_assignments SET stakeholder_name = ?, stakeholder_email = ? WHERE id = ?").run(
+    stakeholderName.trim(),
+    stakeholderEmail.trim(),
+    assignment.id
+  );
+
+  const requirement = db.prepare("SELECT * FROM api_requirements WHERE id = ?").get(req.params.id);
+  res.json(serializeRequirement(requirement, assignmentsForRequirement(requirement.id)));
+});
+
+// POST /api/requirements/:id/assignments/:assignmentId/regenerate-link - revoke the old link and
+// issue a new one. Used when a link leaked or needs to be re-sent; resets that section's progress.
+requirementsRouter.post("/requirements/:id/assignments/:assignmentId/regenerate-link", requireAdmin, (req, res) => {
+  const assignment = getAssignment(req.params.id, req.params.assignmentId);
+  if (!assignment) return res.status(404).json({ error: "not found" });
+
+  db.prepare(
+    "UPDATE section_assignments SET access_token = ?, status = 'pending', data = '{}', completed_at = NULL WHERE id = ?"
+  ).run(nanoid(24), assignment.id);
+
+  const requirement = db.prepare("SELECT * FROM api_requirements WHERE id = ?").get(req.params.id);
+  res.json(serializeRequirement(requirement, assignmentsForRequirement(requirement.id)));
+});
+
+// DELETE /api/requirements/:id - remove a requirement and all of its section assignments
+requirementsRouter.delete("/requirements/:id", requireAdmin, (req, res) => {
+  const result = db.prepare("DELETE FROM api_requirements WHERE id = ?").run(req.params.id);
+  if (result.changes === 0) return res.status(404).json({ error: "not found" });
+  res.status(204).end();
 });
