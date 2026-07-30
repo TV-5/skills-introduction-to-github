@@ -11,6 +11,10 @@ export const requirementsRouter = Router();
 // run for every "/api/*" request Express forwards into this router, including ones meant for
 // the other router, and block them before they ever get there.
 
+function isValidEmail(email) {
+  return /^\S+@\S+$/.test(email);
+}
+
 function getSectionRows() {
   return db.prepare("SELECT * FROM sections ORDER BY sort_order").all();
 }
@@ -69,7 +73,9 @@ requirementsRouter.get("/sections", requireAdmin, (req, res) => {
 
 // GET /api/requirements - list with progress summary
 requirementsRouter.get("/requirements", requireAdmin, (req, res) => {
-  const requirements = db.prepare("SELECT * FROM api_requirements ORDER BY created_at DESC").all();
+  // created_at has only second resolution, so requirements created within the same
+  // second need a tiebreaker to sort predictably as "most recently created first".
+  const requirements = db.prepare("SELECT * FROM api_requirements ORDER BY created_at DESC, id DESC").all();
   const result = requirements.map((r) => serializeRequirement(r, assignmentsForRequirement(r.id)));
   res.json(result);
 });
@@ -81,18 +87,36 @@ requirementsRouter.post("/requirements", requireAdmin, (req, res) => {
   if (!name || typeof name !== "string" || !name.trim()) {
     return res.status(400).json({ error: "name is required" });
   }
+  if (name.trim().length > 200) {
+    return res.status(400).json({ error: "name must be 200 characters or fewer" });
+  }
+  if (typeof description === "string" && description.length > 5000) {
+    return res.status(400).json({ error: "description must be 5000 characters or fewer" });
+  }
   if (!Array.isArray(assignments) || assignments.length === 0) {
     return res.status(400).json({ error: "at least one section assignment is required" });
   }
 
   const sectionsByKey = new Map(getSectionRows().map((s) => [s.key, s]));
+  const seenSectionKeys = new Set();
 
   for (const a of assignments) {
     if (!sectionsByKey.has(a.sectionKey)) {
       return res.status(400).json({ error: `unknown section: ${a.sectionKey}` });
     }
+    if (seenSectionKeys.has(a.sectionKey)) {
+      return res.status(400).json({ error: `duplicate section: ${a.sectionKey}` });
+    }
+    seenSectionKeys.add(a.sectionKey);
+
     if (!a.stakeholderName?.trim() || !a.stakeholderEmail?.trim()) {
       return res.status(400).json({ error: "each assignment needs a stakeholder name and email" });
+    }
+    if (a.stakeholderName.trim().length > 200) {
+      return res.status(400).json({ error: "stakeholder name must be 200 characters or fewer" });
+    }
+    if (!isValidEmail(a.stakeholderEmail.trim()) || a.stakeholderEmail.trim().length > 320) {
+      return res.status(400).json({ error: `invalid stakeholder email: ${a.stakeholderEmail}` });
     }
   }
 
@@ -168,6 +192,12 @@ requirementsRouter.patch("/requirements/:id/assignments/:assignmentId", requireA
   const { stakeholderName, stakeholderEmail } = req.body ?? {};
   if (!stakeholderName?.trim() || !stakeholderEmail?.trim()) {
     return res.status(400).json({ error: "stakeholderName and stakeholderEmail are required" });
+  }
+  if (stakeholderName.trim().length > 200) {
+    return res.status(400).json({ error: "stakeholder name must be 200 characters or fewer" });
+  }
+  if (!isValidEmail(stakeholderEmail.trim()) || stakeholderEmail.trim().length > 320) {
+    return res.status(400).json({ error: `invalid stakeholder email: ${stakeholderEmail}` });
   }
 
   db.prepare("UPDATE section_assignments SET stakeholder_name = ?, stakeholder_email = ? WHERE id = ?").run(

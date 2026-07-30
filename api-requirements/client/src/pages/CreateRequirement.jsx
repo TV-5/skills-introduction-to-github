@@ -26,7 +26,16 @@ export default function CreateRequirement() {
     e.preventDefault();
     setError(null);
 
-    const assignments = Object.entries(stakeholders)
+    const entries = Object.entries(stakeholders);
+
+    const partiallyFilled = entries.filter(([, v]) => Boolean(v?.name?.trim()) !== Boolean(v?.email?.trim()));
+    if (partiallyFilled.length > 0) {
+      const labels = partiallyFilled.map(([sectionKey]) => sections.find((s) => s.key === sectionKey)?.label ?? sectionKey);
+      setError(`Finish or clear the stakeholder name/email for: ${labels.join(", ")}.`);
+      return;
+    }
+
+    const assignments = entries
       .filter(([, v]) => v?.name?.trim() && v?.email?.trim())
       .map(([sectionKey, v]) => ({
         sectionKey,

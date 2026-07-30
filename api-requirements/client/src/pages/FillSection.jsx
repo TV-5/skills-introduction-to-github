@@ -48,7 +48,8 @@ export default function FillSection() {
       setAssignment(updated);
       setStatus(submit ? "Submitted!" : "Draft saved.");
     } catch (e) {
-      setError(e.message);
+      const fieldList = e.body?.missingFields ?? e.body?.invalidFields;
+      setError(fieldList ? `${e.message}: ${fieldList.join(", ")}` : e.message);
       setStatus(null);
     }
   }

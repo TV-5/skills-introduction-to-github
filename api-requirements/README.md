@@ -29,6 +29,10 @@ Configure it via environment variables before running the server:
   `NODE_ENV=production`.
 - `SESSION_SECRET` — signs the session cookie. If unset, a random one is
   generated at boot (sessions won't survive a server restart).
+- `CLIENT_ORIGIN` — the exact origin allowed to make credentialed CORS
+  requests to the API. Defaults to `http://localhost:5173` (the Vite dev
+  server). Set this if the client is ever served from a different origin
+  than the API.
 
 Login attempts are rate-limited (5 bad attempts locks an IP out for a
 minute) and the password is compared with a constant-time hash comparison.
@@ -54,6 +58,19 @@ From the requirement's detail page you can also, as admin: edit a
 stakeholder's name/email in place, regenerate a section's link (revokes the
 old one and resets that section's progress - useful if a link leaked or
 needs resending), or delete the whole requirement.
+
+## Testing
+
+```bash
+cd api-requirements/server && npm test   # node --test + supertest
+cd api-requirements/client && npm test   # vitest + React Testing Library
+```
+
+The server suite is the thorough one (auth, every route, edge cases like
+duplicate/invalid input, cross-tenant access, and the completed-section
+immutability guard). The client suite is small and targeted at the handful
+of client-only behaviors (validation UX, the auth redirect gate) rather than
+exhaustive component coverage.
 
 ## Adding a new section
 
