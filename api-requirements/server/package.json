@@ -1,0 +1,21 @@
+{
+  "name": "api-requirements-server",
+  "private": true,
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "dev": "node --watch src/index.js",
+    "start": "node src/index.js",
+    "test": "DB_PATH=:memory: ADMIN_PASSWORD=test-admin-password SESSION_SECRET=test-session-secret NODE_ENV=test node --test"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.3.0",
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "express-session": "^1.18.0",
+    "nanoid": "^5.0.7"
+  },
+  "devDependencies": {
+    "supertest": "^7.0.0"
+  }
+}
