@@ -26,6 +26,17 @@ export const api = {
     request("/requirements", { method: "POST", body: JSON.stringify(payload) }),
   deleteRequirement: (id) => request(`/requirements/${id}`, { method: "DELETE" }),
   getDocument: (id) => request(`/requirements/${id}/document`),
+  getDocumentPdf: async (id) => {
+    const res = await fetch(`/api/requirements/${id}/document/pdf`, { credentials: "same-origin" });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      const error = new Error(body.error || `Request failed: ${res.status}`);
+      error.status = res.status;
+      error.body = body;
+      throw error;
+    }
+    return res.blob();
+  },
 
   reassignSection: (requirementId, assignmentId, stakeholderName, stakeholderEmail) =>
     request(`/requirements/${requirementId}/assignments/${assignmentId}`, {
@@ -35,6 +46,11 @@ export const api = {
   regenerateSectionLink: (requirementId, assignmentId) =>
     request(`/requirements/${requirementId}/assignments/${assignmentId}/regenerate-link`, {
       method: "POST",
+    }),
+  sendSectionLink: (requirementId, assignmentId, email) =>
+    request(`/requirements/${requirementId}/assignments/${assignmentId}/send-link`, {
+      method: "POST",
+      body: JSON.stringify({ email }),
     }),
 
   getAssignment: (token) => request(`/assignments/${token}`),

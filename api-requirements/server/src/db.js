@@ -36,9 +36,17 @@ db.exec(`
     access_token TEXT NOT NULL UNIQUE,
     status TEXT NOT NULL DEFAULT 'pending',
     data TEXT NOT NULL DEFAULT '{}',
-    completed_at TEXT
+    completed_at TEXT,
+    last_edited_at TEXT
   );
 `);
+
+// Migration for databases created before last_edited_at existed - CREATE TABLE IF NOT EXISTS
+// above won't add columns to an already-existing table.
+const assignmentColumns = db.prepare("PRAGMA table_info(section_assignments)").all().map((c) => c.name);
+if (!assignmentColumns.includes("last_edited_at")) {
+  db.exec("ALTER TABLE section_assignments ADD COLUMN last_edited_at TEXT");
+}
 
 const seedSection = db.prepare(`
   INSERT INTO sections (key, label, description, sort_order, field_schema)

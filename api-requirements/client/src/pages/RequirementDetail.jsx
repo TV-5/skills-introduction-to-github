@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { api } from "../api.js";
 import ProgressBar from "../components/ProgressBar.jsx";
 import SectionCard from "../components/SectionCard.jsx";
+import BackLink from "../components/BackLink.jsx";
 
 export default function RequirementDetail() {
   const { id } = useParams();
@@ -33,6 +34,10 @@ export default function RequirementDetail() {
     setRequirement(await api.regenerateSectionLink(id, assignmentId));
   }
 
+  async function handleSendLink(assignmentId, email) {
+    await api.sendSectionLink(id, assignmentId, email);
+  }
+
   async function handleDelete() {
     if (!window.confirm(`Delete "${requirement.name}" and all of its section data? This cannot be undone.`)) {
       return;
@@ -46,6 +51,7 @@ export default function RequirementDetail() {
 
   return (
     <div className="page">
+      <BackLink to="/">Dashboard</BackLink>
       <div className="page-header">
         <h1>{requirement.name}</h1>
         <div className="form-actions">
@@ -74,6 +80,7 @@ export default function RequirementDetail() {
             section={s}
             onReassign={handleReassign}
             onRegenerateLink={handleRegenerateLink}
+            onSendLink={handleSendLink}
           />
         ))}
       </div>

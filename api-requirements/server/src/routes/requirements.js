@@ -2,7 +2,12 @@ import { Router } from "express";
 import { nanoid } from "nanoid";
 import { db } from "../db.js";
 import { generateDocument } from "../documentGenerator.js";
+import { generatePdf } from "../pdfGenerator.js";
 import { requireAdmin } from "../adminAuth.js";
+import { sendMail } from "../mailer.js";
+import { computeEditWindow } from "../editWindow.js";
+
+const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || "http://localhost:5173";
 
 export const requirementsRouter = Router();
 // Every route here manages requirement/stakeholder data (names, emails, links) - admin only.
@@ -33,18 +38,24 @@ function assignmentsForRequirement(requirementId) {
 }
 
 function serializeRequirement(requirement, assignments) {
-  const sections = assignments.map((row) => ({
-    assignmentId: row.id,
-    sectionId: row.section_id,
-    key: row.section_key,
-    label: row.section_label,
-    description: row.section_description,
-    stakeholderName: row.stakeholder_name,
-    stakeholderEmail: row.stakeholder_email,
-    status: row.status,
-    completedAt: row.completed_at,
-    accessToken: row.access_token,
-  }));
+  const sections = assignments.map((row) => {
+    const { editableUntil, canEdit } = computeEditWindow(row.status, row.completed_at);
+    return {
+      assignmentId: row.id,
+      sectionId: row.section_id,
+      key: row.section_key,
+      label: row.section_label,
+      description: row.section_description,
+      stakeholderName: row.stakeholder_name,
+      stakeholderEmail: row.stakeholder_email,
+      status: row.status,
+      completedAt: row.completed_at,
+      lastEditedAt: row.last_edited_at,
+      editableUntil,
+      canEdit,
+      accessToken: row.access_token,
+    };
+  });
   const totalSections = sections.length;
   const completedSections = sections.filter((s) => s.status === "completed").length;
   return {
@@ -149,18 +160,24 @@ requirementsRouter.get("/requirements/:id", requireAdmin, (req, res) => {
   res.json(serializeRequirement(requirement, assignmentsForRequirement(requirement.id)));
 });
 
-// GET /api/requirements/:id/document - compiled document, only once every section is completed
-requirementsRouter.get("/requirements/:id/document", requireAdmin, (req, res) => {
+// Shared by the markdown and PDF document routes: loads the requirement, confirms every
+// section is completed, and shapes assignments into what the generators expect. Returns
+// { error } (already-sent res aside) when not ready, or { requirement, sectionsWithAssignments }.
+function loadCompiledDocumentInputs(req, res) {
   const requirement = db.prepare("SELECT * FROM api_requirements WHERE id = ?").get(req.params.id);
-  if (!requirement) return res.status(404).json({ error: "not found" });
+  if (!requirement) {
+    res.status(404).json({ error: "not found" });
+    return null;
+  }
 
   const assignments = assignmentsForRequirement(requirement.id);
   const incomplete = assignments.filter((a) => a.status !== "completed");
   if (assignments.length === 0 || incomplete.length > 0) {
-    return res.status(409).json({
+    res.status(409).json({
       error: "document not ready - all sections must be completed first",
       incompleteSections: incomplete.map((a) => a.section_label),
     });
+    return null;
   }
 
   const sectionsWithAssignments = assignments.map((row) => ({
@@ -173,8 +190,31 @@ requirementsRouter.get("/requirements/:id/document", requireAdmin, (req, res) =>
     },
   }));
 
-  const markdown = generateDocument(requirement, sectionsWithAssignments);
+  return { requirement, sectionsWithAssignments };
+}
+
+// GET /api/requirements/:id/document - compiled document, only once every section is completed
+requirementsRouter.get("/requirements/:id/document", requireAdmin, (req, res) => {
+  const inputs = loadCompiledDocumentInputs(req, res);
+  if (!inputs) return;
+
+  const markdown = generateDocument(inputs.requirement, inputs.sectionsWithAssignments);
   res.json({ markdown });
+});
+
+// GET /api/requirements/:id/document/pdf - same document, formatted as a downloadable PDF
+requirementsRouter.get("/requirements/:id/document/pdf", requireAdmin, (req, res) => {
+  const inputs = loadCompiledDocumentInputs(req, res);
+  if (!inputs) return;
+
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader(
+    "Content-Disposition",
+    `attachment; filename="api-requirements-${inputs.requirement.id}.pdf"`
+  );
+  const doc = generatePdf(inputs.requirement, inputs.sectionsWithAssignments);
+  doc.pipe(res);
+  doc.end();
 });
 
 function getAssignment(requirementId, assignmentId) {
@@ -217,11 +257,35 @@ requirementsRouter.post("/requirements/:id/assignments/:assignmentId/regenerate-
   if (!assignment) return res.status(404).json({ error: "not found" });
 
   db.prepare(
-    "UPDATE section_assignments SET access_token = ?, status = 'pending', data = '{}', completed_at = NULL WHERE id = ?"
+    "UPDATE section_assignments SET access_token = ?, status = 'pending', data = '{}', completed_at = NULL, last_edited_at = NULL WHERE id = ?"
   ).run(nanoid(24), assignment.id);
 
   const requirement = db.prepare("SELECT * FROM api_requirements WHERE id = ?").get(req.params.id);
   res.json(serializeRequirement(requirement, assignmentsForRequirement(requirement.id)));
+});
+
+// POST /api/requirements/:id/assignments/:assignmentId/send-link - email the stakeholder (or an
+// admin-supplied override address) their private fill link.
+requirementsRouter.post("/requirements/:id/assignments/:assignmentId/send-link", requireAdmin, async (req, res) => {
+  const assignment = getAssignment(req.params.id, req.params.assignmentId);
+  if (!assignment) return res.status(404).json({ error: "not found" });
+
+  const email = (req.body?.email ?? assignment.stakeholder_email ?? "").trim();
+  if (!isValidEmail(email) || email.length > 320) {
+    return res.status(400).json({ error: `invalid email: ${email}` });
+  }
+
+  const requirement = db.prepare("SELECT * FROM api_requirements WHERE id = ?").get(req.params.id);
+  const link = `${CLIENT_ORIGIN}/fill/${assignment.access_token}`;
+  const text = `Here's the link to the API requirement ${requirement.id}, please fill it: ${link}`;
+
+  try {
+    await sendMail({ to: email, subject: `API Requirement #${requirement.id}: ${requirement.name}`, text });
+  } catch (err) {
+    return res.status(502).json({ error: err.message });
+  }
+
+  res.json({ sent: true, to: email });
 });
 
 // DELETE /api/requirements/:id - remove a requirement and all of its section assignments

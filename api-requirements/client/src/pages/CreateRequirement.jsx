@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api.js";
+import BackLink from "../components/BackLink.jsx";
 
 export default function CreateRequirement() {
   const navigate = useNavigate();
@@ -61,6 +62,7 @@ export default function CreateRequirement() {
 
   return (
     <div className="page">
+      <BackLink to="/">Dashboard</BackLink>
       <h1>New API Requirement</h1>
       <form onSubmit={handleSubmit} className="form">
         <label>

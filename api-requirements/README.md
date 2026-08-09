@@ -32,7 +32,17 @@ Configure it via environment variables before running the server:
 - `CLIENT_ORIGIN` — the exact origin allowed to make credentialed CORS
   requests to the API. Defaults to `http://localhost:5173` (the Vite dev
   server). Set this if the client is ever served from a different origin
-  than the API.
+  than the API. Also used to build the `/fill/:token` links sent by email.
+
+Emailing a stakeholder their fill link (the "Send email" button on a
+requirement's section card) requires SMTP credentials:
+
+- `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` — required. Port `465`
+  connects with implicit TLS; anything else uses STARTTLS.
+- `SMTP_FROM` — the `From` address. Defaults to `SMTP_USER`.
+
+Without these set, sending returns an error explaining email isn't
+configured — everything else in the app works fine without them.
 
 Login attempts are rate-limited (5 bad attempts locks an IP out for a
 minute) and the password is compared with a constant-time hash comparison.

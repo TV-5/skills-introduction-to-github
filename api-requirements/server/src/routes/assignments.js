@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { db } from "../db.js";
+import { computeEditWindow } from "../editWindow.js";
 
 export const assignmentsRouter = Router();
 
@@ -18,6 +19,7 @@ function getByToken(token) {
 }
 
 function serialize(row) {
+  const { editableUntil, canEdit } = computeEditWindow(row.status, row.completed_at);
   return {
     requirementId: row.requirement_id,
     requirementName: row.requirement_name,
@@ -30,6 +32,9 @@ function serialize(row) {
     status: row.status,
     data: JSON.parse(row.data),
     completedAt: row.completed_at,
+    lastEditedAt: row.last_edited_at,
+    editableUntil,
+    canEdit,
   };
 }
 
@@ -40,12 +45,15 @@ assignmentsRouter.get("/assignments/:token", (req, res) => {
   res.json(serialize(row));
 });
 
-// PUT /api/assignments/:token - save a draft or submit as complete
+// PUT /api/assignments/:token - save a draft, submit as complete, or (within the edit window)
+// revise an already-completed section.
 assignmentsRouter.put("/assignments/:token", (req, res) => {
   const row = getByToken(req.params.token);
   if (!row) return res.status(404).json({ error: "invalid link" });
-  if (row.status === "completed") {
-    return res.status(409).json({ error: "section already submitted" });
+
+  const isEdit = row.status === "completed";
+  if (isEdit && !computeEditWindow(row.status, row.completed_at).canEdit) {
+    return res.status(409).json({ error: "the edit window for this section has closed" });
   }
 
   const { data, submit } = req.body ?? {};
@@ -55,7 +63,9 @@ assignmentsRouter.put("/assignments/:token", (req, res) => {
 
   const fields = JSON.parse(row.section_field_schema);
 
-  if (submit) {
+  // A completed section is always re-validated as if submitting, since it can't go back to
+  // a draft state once it has stakeholder-facing "submitted" status.
+  if (submit || isEdit) {
     const missing = fields.filter((f) => f.required && !String(data[f.key] ?? "").trim());
     if (missing.length > 0) {
       return res.status(400).json({
@@ -75,12 +85,18 @@ assignmentsRouter.put("/assignments/:token", (req, res) => {
     }
   }
 
-  const status = submit ? "completed" : "in_progress";
-  db.prepare(
-    `UPDATE section_assignments
-     SET data = ?, status = ?, completed_at = ?
-     WHERE access_token = ?`
-  ).run(JSON.stringify(data), status, submit ? new Date().toISOString() : null, req.params.token);
+  if (isEdit) {
+    db.prepare(
+      `UPDATE section_assignments SET data = ?, last_edited_at = ? WHERE access_token = ?`
+    ).run(JSON.stringify(data), new Date().toISOString(), req.params.token);
+  } else {
+    const status = submit ? "completed" : "in_progress";
+    db.prepare(
+      `UPDATE section_assignments
+       SET data = ?, status = ?, completed_at = ?
+       WHERE access_token = ?`
+    ).run(JSON.stringify(data), status, submit ? new Date().toISOString() : null, req.params.token);
+  }
 
   res.json(serialize(getByToken(req.params.token)));
 });

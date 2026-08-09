@@ -1,6 +1,6 @@
 import test, { beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { freshApp, request, loginAgent, resetDb } from "./helpers.js";
+import { freshApp, request, loginAgent, resetDb, db } from "./helpers.js";
 
 const app = freshApp();
 let agent;
@@ -122,21 +122,62 @@ test("data must be a plain object: null, missing, string, number, and array are 
   assert.equal(arrayRes.status, 400);
 });
 
-test("PUT on an already-completed assignment is rejected and does not overwrite the data", async () => {
+test("editing a completed assignment within the edit window updates the data and sets lastEditedAt, without disturbing the original completedAt", async () => {
+  const section = await createPayloadAssignment();
+
+  const first = await request(app)
+    .put(`/api/assignments/${section.accessToken}`)
+    .send({ data: { request_payload: "original", response_payload: "original" }, submit: true });
+  assert.equal(first.body.lastEditedAt, null);
+
+  const edited = await request(app)
+    .put(`/api/assignments/${section.accessToken}`)
+    .send({ data: { request_payload: "revised", response_payload: "revised" }, submit: true });
+
+  assert.equal(edited.status, 200);
+  assert.equal(edited.body.status, "completed");
+  assert.equal(edited.body.data.request_payload, "revised");
+  assert.equal(edited.body.completedAt, first.body.completedAt);
+  assert.ok(edited.body.lastEditedAt);
+});
+
+test("editing a completed assignment still enforces required fields", async () => {
+  const section = await createPayloadAssignment();
+
+  await request(app)
+    .put(`/api/assignments/${section.accessToken}`)
+    .send({ data: { request_payload: "a", response_payload: "b" }, submit: true });
+
+  const res = await request(app)
+    .put(`/api/assignments/${section.accessToken}`)
+    .send({ data: { request_payload: "a" }, submit: true });
+
+  assert.equal(res.status, 400);
+  assert.deepEqual(res.body.missingFields, ["Response payload"]);
+});
+
+test("editing a completed assignment after the edit window has closed is rejected and does not overwrite the data", async () => {
   const section = await createPayloadAssignment();
 
   await request(app)
     .put(`/api/assignments/${section.accessToken}`)
     .send({ data: { request_payload: "original", response_payload: "original" }, submit: true });
 
-  const secondAttempt = await request(app)
+  db.prepare("UPDATE section_assignments SET completed_at = ? WHERE access_token = ?").run(
+    new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString(),
+    section.accessToken
+  );
+
+  const res = await request(app)
     .put(`/api/assignments/${section.accessToken}`)
     .send({ data: { request_payload: "overwritten", response_payload: "overwritten" }, submit: true });
-  assert.equal(secondAttempt.status, 409);
+  assert.equal(res.status, 409);
+  assert.match(res.body.error, /edit window/);
 
   const stillOriginal = await request(app).get(`/api/assignments/${section.accessToken}`);
   assert.equal(stillOriginal.body.data.request_payload, "original");
   assert.equal(stillOriginal.body.status, "completed");
+  assert.equal(stillOriginal.body.canEdit, false);
 });
 
 test("PUT with an unknown token -> 404", async () => {

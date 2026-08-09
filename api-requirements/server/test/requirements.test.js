@@ -162,6 +162,78 @@ test("GET /api/requirements/:id/document: 409 while incomplete, 200 once all sec
   assert.match(ready.body.markdown, /Provided by Bob \(bob@example\.com\)/);
 });
 
+test("GET /api/requirements/:id/document/pdf: 409 while incomplete, 200 PDF once complete, 404 for unknown id", async () => {
+  const created = await createRequirement();
+
+  const missing = await agent.get("/api/requirements/999999/document/pdf");
+  assert.equal(missing.status, 404);
+
+  const notReady = await agent.get(`/api/requirements/${created.body.id}/document/pdf`);
+  assert.equal(notReady.status, 409);
+
+  for (const section of created.body.sections) {
+    const requiredData =
+      section.key === "payload"
+        ? { request_payload: "{id}", response_payload: "{id,status}" }
+        : { auth_mechanism: "OAuth2", authorization_model: "RBAC", data_classification: "Confidential" };
+    await request(app).put(`/api/assignments/${section.accessToken}`).send({ data: requiredData, submit: true });
+  }
+
+  const ready = await agent.get(`/api/requirements/${created.body.id}/document/pdf`);
+  assert.equal(ready.status, 200);
+  assert.match(ready.headers["content-type"], /application\/pdf/);
+  assert.match(ready.headers["content-disposition"], new RegExp(`api-requirements-${created.body.id}\\.pdf`));
+});
+
+test("completed section reports canEdit true and an editableUntil ~3 days out", async () => {
+  const created = await createRequirement();
+  const section = created.body.sections[0];
+
+  await request(app)
+    .put(`/api/assignments/${section.accessToken}`)
+    .send({ data: { request_payload: "a", response_payload: "b" }, submit: true });
+
+  const res = await agent.get(`/api/requirements/${created.body.id}`);
+  const updated = res.body.sections.find((s) => s.assignmentId === section.assignmentId);
+  assert.equal(updated.canEdit, true);
+  assert.equal(updated.lastEditedAt, null);
+  const msUntil = new Date(updated.editableUntil).getTime() - Date.now();
+  assert.ok(msUntil > 2.9 * 24 * 60 * 60 * 1000 && msUntil < 3.1 * 24 * 60 * 60 * 1000);
+});
+
+test("POST send-link: unknown assignment -> 404, invalid email -> 400, unconfigured SMTP -> 502", async () => {
+  const created = await createRequirement();
+  const section = created.body.sections[0];
+
+  const missing = await agent
+    .post(`/api/requirements/${created.body.id}/assignments/999999/send-link`)
+    .send({ email: "a@example.com" });
+  assert.equal(missing.status, 404);
+
+  const badEmail = await agent
+    .post(`/api/requirements/${created.body.id}/assignments/${section.assignmentId}/send-link`)
+    .send({ email: "not-an-email" });
+  assert.equal(badEmail.status, 400);
+
+  // SMTP isn't configured in the test environment, so a validly-addressed send still fails -
+  // but only after getting past validation, confirming the route reaches the mailer.
+  const notConfigured = await agent
+    .post(`/api/requirements/${created.body.id}/assignments/${section.assignmentId}/send-link`)
+    .send({ email: "stakeholder@example.com" });
+  assert.equal(notConfigured.status, 502);
+  assert.match(notConfigured.body.error, /email is not configured/);
+});
+
+test("POST send-link with no email in the body defaults to the assigned stakeholder's address", async () => {
+  const created = await createRequirement();
+  const section = created.body.sections[0];
+
+  const res = await agent
+    .post(`/api/requirements/${created.body.id}/assignments/${section.assignmentId}/send-link`)
+    .send({});
+  assert.equal(res.status, 502); // unconfigured SMTP, but it got past the "no email" check
+});
+
 test("PATCH assignment: happy path updates name/email, leaves status/token/data untouched", async () => {
   const created = await createRequirement();
   const section = created.body.sections[0];
@@ -255,11 +327,16 @@ test("every requirements route rejects requests with no admin session", async ()
     () => request(app).post("/api/requirements").send({ name: "x", assignments: [] }),
     () => request(app).get(`/api/requirements/${created.body.id}`),
     () => request(app).get(`/api/requirements/${created.body.id}/document`),
+    () => request(app).get(`/api/requirements/${created.body.id}/document/pdf`),
     () =>
       request(app)
         .patch(`/api/requirements/${created.body.id}/assignments/${section.assignmentId}`)
         .send({ stakeholderName: "x", stakeholderEmail: "x@example.com" }),
     () => request(app).post(`/api/requirements/${created.body.id}/assignments/${section.assignmentId}/regenerate-link`),
+    () =>
+      request(app)
+        .post(`/api/requirements/${created.body.id}/assignments/${section.assignmentId}/send-link`)
+        .send({ email: "x@example.com" }),
     () => request(app).delete(`/api/requirements/${created.body.id}`),
   ];
 

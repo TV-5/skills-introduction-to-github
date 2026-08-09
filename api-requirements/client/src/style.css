@@ -1,8 +1,10 @@
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
   --border: #d0d0d5;
   --accent: #2f6fed;
   --text-muted: #666;
+  --bg: #ffffff;
+  --text: #1a1a1a;
 }
 
 * {
@@ -12,8 +14,8 @@
 body {
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
   margin: 0;
-  background: canvas;
-  color: canvastext;
+  background: var(--bg);
+  color: var(--text);
 }
 
 .page {
@@ -36,6 +38,18 @@ body {
   font-weight: 700;
   color: inherit;
   text-decoration: none;
+}
+
+.back-link {
+  display: inline-block;
+  color: var(--text-muted);
+  text-decoration: none;
+  font-size: 0.9rem;
+  margin-bottom: 1rem;
+}
+
+.back-link:hover {
+  text-decoration: underline;
 }
 
 .page-header {
@@ -163,6 +177,15 @@ h1 {
   font-weight: normal;
 }
 
+.review-value {
+  white-space: pre-wrap;
+  padding: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: rgba(127, 127, 127, 0.06);
+  font-weight: normal;
+}
+
 .required {
   color: #c0392b;
   margin-left: 0.25rem;
@@ -201,6 +224,19 @@ h1 {
 
 .section-card-header h3 {
   margin: 0;
+}
+
+.success-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: #d4edda;
+  color: #1e7e34;
+  border: 1px solid #b6e0c0;
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  font-weight: 600;
+  margin: 1rem 0;
 }
 
 .status-badge {

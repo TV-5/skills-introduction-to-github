@@ -13,7 +13,9 @@
     "cors": "^2.8.5",
     "express": "^4.19.2",
     "express-session": "^1.18.0",
-    "nanoid": "^5.0.7"
+    "nanoid": "^5.0.7",
+    "nodemailer": "^9.0.5",
+    "pdfkit": "^0.19.1"
   },
   "devDependencies": {
     "supertest": "^7.0.0"
